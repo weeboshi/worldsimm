@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Narrative World Simulator v2</title>
+    <!-- D3.js -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --bg-dark: #04040d;
+            --panel-bg: rgba(8, 8, 20, 0.85);
+            --primary: #7c3aed;
+            --primary-hover: #9d5cf8;
+            --accent: #0ea5e9;
+            --danger: #ef4444;
+            --text-main: #e2e8f0;
+            --text-muted: #64748b;
+            --border: rgba(124, 58, 237, 0.2);
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg-dark); color: var(--text-main);
+            height: 100vh; overflow: hidden; display: flex;
+        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.4); border-radius: 4px; }
+
+        /* Layout */
+        .sidebar { width: 70px; background: rgba(0,0,0,0.5); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 20px; gap: 15px; z-index: 10; }
+        .nav-btn { width: 44px; height: 44px; border-radius: 12px; border: 1px solid transparent; background: transparent; color: #475569; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 9px; letter-spacing: 1px; transition: 0.2s; }
+        .nav-btn span { font-size: 18px; margin-bottom: 2px; }
+        .nav-btn:hover { background: rgba(124,58,237,0.1); color: #a78bfa; }
+        .nav-btn.active { background: rgba(124,58,237,0.2); border-color: var(--primary); color: #fff; box-shadow: 0 0 15px rgba(124,58,237,0.2); }
+
+        .main { flex: 1; display: flex; flex-direction: column; position: relative; }
+        .topbar { padding: 15px 25px; border-bottom: 1px solid var(--border); background: rgba(4,4,13,0.8); backdrop-filter: blur(10px); display: flex; justify-content: space-between; align-items: center; }
+        .world-input { background: transparent; border: none; color: #fff; font-size: 24px; font-weight: 800; width: 300px; }
+        .stats-pill { font-size: 11px; color: #475569; letter-spacing: 0.5px; margin-right: 15px; }
+        
+        .content { flex: 1; overflow-y: auto; padding: 25px; }
+        .section-title { font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #475569; margin-bottom: 12px; margin-top: 20px; }
+
+        /* Cards & Forms */
+        .card { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; transition: 0.2s; }
+        .card:hover { border-color: rgba(124,58,237,0.4); }
+        
+        input, select, textarea {
+            background: rgba(10,10,25,0.8); border: 1px solid rgba(124,58,237,0.2);
+            color: #e2e8f0; border-radius: 8px; padding: 10px; width: 100%; font-size: 13px; font-family: inherit; margin-bottom: 10px;
+        }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(124,58,237,0.1); }
+        
+        .btn { padding: 8px 16px; border-radius: 8px; border: none; font-weight: 600; font-size: 12px; cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-primary { background: linear-gradient(135deg, var(--primary), var(--accent)); color: white; }
+        .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+        .btn-ghost { background: rgba(124,58,237,0.1); color: #a78bfa; border: 1px solid rgba(124,58,237,0.2); }
+        .btn-ghost:hover { background: rgba(124,58,237,0.2); }
+        .btn-danger { background: rgba(239,68,68,0.1); color: #fca5a5; border: 1px solid rgba(239,68,68,0.2); }
+
+        /* Components */
+        .char-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; }
+        .stat-row { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px; color: #94a3b8; }
+        .stat-bar-bg { height: 4px; background: rgba(255,255,255,0.05); border-radius: 2px; overflow: hidden; margin-bottom: 8px; }
+        .stat-bar-fill { height: 100%; transition: width 0.5s; }
+        
+        .timeline-item { display: flex; gap: 15px; margin-bottom: 20px; position: relative; }
+        .timeline-line { position: absolute; left: 16px; top: 35px; bottom: -20px; width: 1px; background: rgba(124,58,237,0.1); }
+        .timeline-item:last-child .timeline-line { display: none; }
+        .timeline-icon { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; border: 1px solid; flex-shrink: 0; z-index: 1; }
+        
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 100; display: flex; align-items: center; justify-content: center; }
+        .hidden { display: none !important; }
+        
+        /* Animation */
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(124,58,237, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(124,58,237, 0); } 100% { box-shadow: 0 0 0 0 rgba(124,58,237, 0); } }
+        .live-indicator { width: 8px; height: 8px; background: #10b981; border-radius: 50%; display: inline-block; margin-right: 6px; }
+        .simulating .live-indicator { animation: pulse 2s infinite; background: #ef4444; }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar -->
+    <nav class="sidebar">
+        <div style="font-weight:900; font-size:24px; color:#fff; margin-bottom:10px;">◈</div>
+        <button class="nav-btn active" onclick="app.router('overview')" id="nav-overview"><span>◈</span>World</button>
+        <button class="nav-btn" onclick="app.router('characters')" id="nav-characters"><span>◎</span>Cast</button>
+        <button class="nav-btn" onclick="app.router('network')" id="nav-network"><span>◇</span>Net</button>
+        <button class="nav-btn" onclick="app.router('timeline')" id="nav-timeline"><span>◉</span>Log</button>
+        <button class="nav-btn" onclick="app.router('simulate')" id="nav-simulate"><span>⚡</span>Sim</button>
+    </nav>
+
+    <!-- Main App -->
+    <main class="main">
+        <header class="topbar">
+            <div>
+                <input id="world-name" class="world-input" value="My World">
+                <div style="margin-top:5px">
+                    <span class="stats-pill" id="stat-time">Year 1, Turn 0</span>
+                    <span class="stats-pill" id="stat-chars">0 Cast</span>
+                    <span class="stats-pill" id="stat-events">0 Events</span>
+                </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <div id="sim-status" class="hidden" style="font-size:11px; color:#10b981; display:flex; align-items:center;"><span class="live-indicator"></span> AUTO-SIMULATING</div>
+                <button class="btn btn-ghost" onclick="app.toggleSettings()">⚙ API Key</button>
+                <button class="btn btn-primary" onclick="app.save()">Save</button>
+            </div>
+        </header>
+
+        <div id="content-area" class="content">
+            <!-- Dynamic Content Injected Here -->
+        </div>
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal-overlay hidden">
+        <div class="card" style="width:400px; background:#0a0a1a; border:1px solid #333;">
+            <h3 class="section-title" style="color:white; margin-top:0;">Configuration</h3>
+            <label style="font-size:12px; color:#94a3b8; display:block; margin-bottom:5px;">Anthropic API Key</label>
+            <input type="password" id="api-key" placeholder="sk-ant-...">
+            <p style="font-size:11px; color:#64748b; margin-bottom:20px;">
+                Required for AI. If empty, the app runs in <b>Deterministic Mock Mode</b> (logic only).
+            </p>
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button class="btn btn-ghost" onclick="app.toggleSettings()">Close</button>
+                <button class="btn btn-primary" onclick="app.saveSettings()">Save</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+/**
+ * NARRATIVE WORLD SIMULATOR V2
+ * Vanilla JS Implementation
+ */
+
+// --- UTILS ---
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+const uuid = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
+const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
+
+// --- CONSTANTS ---
+const COLORS = {
+    power: "#7c3aed", love: "#ec4899", ambition: "#f59e0b", jealousy: "#ef4444", trust: "#0ea5e9",
+    bg_glow: "rgba(124,58,237,0.15)"
+};
+
+// --- CORE STATE ---
+const app = {
+    state: {
+        name: "My World",
+        setting: "A dark academy",
+        time: { turn: 0, year: 1 },
+        dramaLevel: 7,
+        characters: [],
+        relationships: [],
+        timeline: [],
+        memory: [],
+        apiKey: ""
+    },
+    isSimulating: false,
+    simInterval: null,
+
+    init() {
+        this.load();
+        this.renderNav();
+        this.router('overview');
+        this.updateStats();
+        
+        // Event Listeners
+        $('#world-name').addEventListener('input', (e) => {
+            this.state.name = e.target.value;
+            this.save();
+        });
+    },
+
+    save() {
+        localStorage.setItem('wsim_v2', JSON.stringify(this.state));
+        this.showToast('World Saved', 'ok');
+    },
+
+    load() {
+        const data = localStorage.getItem('wsim_v2');
+        if (data) {
+            const parsed = JSON.parse(data);
+            // Merge to ensure new fields exist (like 'time')
+            this.state = { ...this.state, ...parsed };
+            if (!this.state.time) this.state.time = { turn: 0, year: 1 };
+        }
+        $('#api-key').value = this.state.apiKey || "";
+    },
+
+    toggleSettings() {
+        $('#settings-modal').classList.toggle('hidden');
+    },
+
+    saveSettings() {
+        this.state.apiKey = $('#api-key').value.trim();
+        this.save();
+        this.toggleSettings();
+    },
+
+    updateStats() {
+        $('#stat-time').innerText = `Year ${this.state.time.year}, Turn ${this.state.time.turn}`;
+        $('#stat-chars').innerText = `${this.state.characters.length} Cast`;
+        $('#stat-events').innerText = `${this.state.timeline.length} Events`;
+        $('#world-name').value = this.state.name;
+    },
+
+    showToast(msg) {
+        const t = document.createElement('div');
+        t.style.cssText = `position:fixed;bottom:20px;right:20px;background:#10b98122;border:1px solid #10b981;color:#10b981;padding:10px 20px;border-radius:8px;font-size:12px;z-index:999;animation: fadeUp 0.3s`;
+        t.innerText = msg;
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 2000);
+    },
+
+    // --- NAVIGATION ---
+    router(page) {
+        $$('.nav-btn').forEach(b => b.classList.remove('active'));
+        $(`#nav-${page}`).classList.add('active');
+        
+        const container = $('#content-area');
+        container.innerHTML = ''; // Clear
+
+        if (page === 'overview') this.renderOverview(container);
+        if (page === 'characters') this.renderCharacters(container);
+        if (page === 'network') setTimeout(() => this.renderNetwork(container), 50); // Timeout for DOM paint
+        if (page === 'timeline') this.renderTimeline(container);
+        if (page === 'simulate') this.renderSimulate(container);
+    },
+
+    renderNav() {
+        // Nav is static in HTML, just active state updates needed in router
+    },
+
+    // --- PAGE RENDERERS ---
+
+    renderOverview(container) {
+        container.innerHTML = `
+            <div class="card">
+                <h3 class="section-title">World Settings</h3>
+                <label>Setting Description</label>
+                <textarea id="inp-setting" rows="3">${this.state.setting}</textarea>
+                <label>Drama Level (1-10): ${this.state.dramaLevel}</label>
+                <input type="range" min="1" max="10" value="${this.state.dramaLevel}" oninput="app.state.dramaLevel = parseInt(this.value); app.save(); app.updateStats();">
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button class="btn btn-primary" onclick="app.router('simulate')">Go to Simulation</button>
+                <button class="btn btn-ghost" onclick="app.router('characters')">Manage Cast</button>
+            </div>
+        `;
+        $('#inp-setting').addEventListener('input', (e) => { this.state.setting = e.target.value; this.save(); });
+    },
+
+    renderCharacters(container) {
+        const html = `
+            <div style="display:grid; grid-template-columns: 300px 1fr; gap:20px;">
+                <div class="card">
+                    <h3 class="section-title" style="margin-top:0">Create Character</h3>
+                    <input id="c-name" placeholder="Name">
+                    <input id="c-archetype" placeholder="Archetype (e.g. The Heir)">
+                    <textarea id="c-desc" placeholder="Description..." rows="3"></textarea>
+                    <button class="btn btn-primary w-full" style="width:100%; justify-content:center" onclick="app.addChar()">Add Character</button>
+                    
+                    <h3 class="section-title">Add Relationship</h3>
+                    <select id="r-from"><option value="">From...</option>${this.state.characters.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select>
+                    <select id="r-to"><option value="">To...</option>${this.state.characters.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select>
+                    <select id="r-type">
+                        <option value="tension">Tension</option>
+                        <option value="alliance">Alliance</option>
+                        <option value="rivalry">Rivalry</option>
+                        <option value="love">Love</option>
+                        <option value="betrayal">Betrayal</option>
+                    </select>
+                    <button class="btn btn-ghost w-full" style="width:100%; justify-content:center" onclick="app.addRel()">Link</button>
+                </div>
+                <div class="char-grid">
+                    ${this.state.characters.map(c => `
+                        <div class="card">
+                            <div style="display:flex; justify-content:space-between;">
+                                <strong style="font-size:16px;">${c.name}</strong>
+                                <button class="btn btn-danger" style="padding:4px 8px; font-size:10px;" onclick="app.delChar('${c.id}')">✕</button>
+                            </div>
+                            <div style="font-size:11px; color:#64748b; margin-bottom:10px;">${c.archetype}</div>
+                            <p style="font-size:12px; color:#94a3b8; margin-bottom:15px; line-height:1.4;">${c.description}</p>
+                            ${this.renderStats(c)}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    },
+
+    renderStats(c) {
+        const bars = ['power', 'love', 'ambition', 'jealousy', 'trust'].map(k => `
+            <div>
+                <div class="stat-row">
+                    <span style="text-transform:uppercase;">${k}</span>
+                    <span>${c.stats[k].toFixed(1)}</span>
+                </div>
+                <div class="stat-bar-bg">
+                    <div class="stat-bar-fill" style="width:${c.stats[k]*10}%; background:${COLORS[k]};"></div>
+                </div>
+            </div>
+        `).join('');
+        return bars;
+    },
+
+    renderTimeline(container) {
+        const items = this.state.timeline.map((ev, i) => {
+            const color = COLORS[ev.type] || '#fff';
+            return `
+                <div class="timeline-item">
+                    <div class="timeline-line"></div>
+                    <div class="timeline-icon" style="border-color:${color}; background:${color}22; color:${color}">
+                        ${ev.type.charAt(0).toUpperCase()}
+                    </div>
+                    <div class="card" style="flex:1; padding:15px; margin-bottom:0;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                            <span style="font-size:11px; font-weight:700; color:${color}; text-transform:uppercase;">${ev.type}</span>
+                            <span style="font-size:11px; color:#475569;">Turn ${ev.turn} (Year ${ev.year})</span>
+                        </div>
+                        <div style="font-weight:600; font-size:14px; margin-bottom:5px;">${ev.event}</div>
+                        ${ev.effects_summary ? `<div style="font-size:11px; color:#64748b; font-style:italic;">${ev.effects_summary}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        container.innerHTML = `<div>${items}</div>`;
+    },
+
+    renderSimulate(container) {
+        container.innerHTML = `
+            <div style="display:flex; gap:20px; flex-wrap:wrap;">
+                <div class="card" style="flex:1; min-width:300px;">
+                    <h3 class="section-title">Simulation Controls</h3>
+                    <p style="font-size:12px; color:#64748b; line-height:1.5;">
+                        The simulation engine now uses deterministic state deltas. Events will mechanically alter character stats (Power, Trust, Jealousy) and relationships.
+                    </p>
+                    <div style="display:flex; gap:10px; margin-top:20px;">
+                        <button class="btn btn-primary" id="btn-trigger" onclick="app.triggerEvent()">⚡ Trigger 1 Event</button>
+                        <button class="btn btn-ghost" id="btn-auto" onclick="app.toggleAutoSim()">▶ Auto-Simulate</button>
+                    </div>
+                    <div id="sim-output" class="hidden" style="margin-top:20px; padding:10px; background:#000; border:1px solid #333; font-family:monospace; font-size:11px; color:#10b981; max-height:200px; overflow-y:auto;">
+                        LOG: Waiting...
+                    </div>
+                </div>
+                
+                <div class="card" style="flex:1; min-width:300px;">
+                    <h3 class="section-title">Current State Snapshot</h3>
+                    <pre style="font-size:10px; color:#64748b; white-space:pre-wrap; overflow:hidden;">${JSON.stringify({
+                        time: this.state.time,
+                        characters: this.state.characters.map(c => ({name:c.name, stats:c.stats})),
+                        relationships: this.state.relationships.map(r => {
+                            const c1 = this.state.characters.find(x=>x.id===r.from)?.name;
+                            const c2 = this.state.characters.find(x=>x.id===r.to)?.name;
+                            return {from:c1, to:c2, type:r.type, strength:r.strength};
+                        })
+                    }, null, 2)}</pre>
+                </div>
+            </div>
+        `;
+    },
+
+    renderNetwork(container) {
+        container.innerHTML = `<div id="net-container" class="card" style="height:600px; padding:0; overflow:hidden;"></div>`;
+        setTimeout(() => this.drawNetwork(), 100);
+    },
+
+    // --- LOGIC: CHARACTER & RELATIONSHIP ---
+
+    addChar() {
+        const name = $('#c-name').value;
+        if(!name) return;
+        this.state.characters.push({
+            id: uuid(),
+            name: name,
+            archetype: $('#c-archetype').value || "Unknown",
+            description: $('#c-desc').value,
+            stats: { power: 5, love: 5, ambition: 5, jealousy: 5, trust: 5 }
+        });
+        this.save();
+        this.updateStats();
+        this.renderCharacters($('#content-area'));
+    },
+
+    delChar(id) {
+        if(!confirm("Delete?")) return;
+        this.state.characters = this.state.characters.filter(c => c.id !== id);
+        this.state.relationships = this.state.relationships.filter(r => r.from !== id && r.to !== id);
+        this.save();
+        this.updateStats();
+        this.renderCharacters($('#content-area'));
+    },
+
+    addRel() {
+        const from = $('#r-from').value;
+        const to = $('#r-to').value;
+        if(!from || !to || from === to) return alert("Invalid selection");
+        
+        this.state.relationships.push({
+            id: uuid(), from, to, type: $('#r-type').value, strength: 5
+        });
+        this.save();
+        this.renderCharacters($('#content-area'));
+    },
+
+    // --- LOGIC: SIMULATION ENGINE ---
+
+    logSim(msg) {
+        const el = $('#sim-output');
+        if(el) {
+            el.classList.remove('hidden');
+            el.innerHTML += `<div>> ${msg}</div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+    },
+
+    async toggleAutoSim() {
+        const btn = $('#btn-auto');
+        const status = $('#sim-status');
+        
+        if (this.isSimulating) {
+            clearInterval(this.simInterval);
+            this.isSimulating = false;
+            btn.innerText = "▶ Auto-Simulate";
+            status.classList.add('hidden');
+            document.body.classList.remove('simulating');
+        } else {
+            this.isSimulating = true;
+            btn.innerText = "⏸ Stop Sim";
+            status.classList.remove('hidden');
+            document.body.classList.add('simulating');
+            
+            // Run immediately then interval
+            await this.triggerEvent();
+            this.simInterval = setInterval(() => this.triggerEvent(), 5000); // 5s per tick
+        }
+    },
+
+    async triggerEvent() {
+        if (this.state.characters.length < 2) return alert("Need at least 2 characters.");
+        
+        const btn = $('#btn-trigger');
+        if(btn) btn.disabled = true;
+        this.logSim(`Calculating Turn ${this.state.time.turn + 1}...`);
+
+        try {
+            // 1. Prepare Context for AI
+            const context = this.getSimContext();
+            
+            // 2. Call AI (Real or Mock)
+            const response = await this.callSimulator(context);
+            
+            if (response) {
+                // 3. Apply Deterministic Effects
+                this.applyEffects(response.effects);
+                
+                // 4. Advance Time
+                this.state.time.turn++;
+                if(this.state.time.turn % 4 === 0) this.state.time.year++; // 4 turns = 1 year
+                
+                // 5. Record Event
+                this.state.timeline.unshift({
+                    id: uuid(),
+                    turn: this.state.time.turn,
+                    year: this.state.time.year,
+                    ...response
+                });
+                
+                this.logSim(`Event: ${response.event}`);
+                this.save();
+                this.updateStats();
+                
+                // Refresh views if active
+                if(!$('#content-area').innerHTML.includes("Simulate")) {
+                    // If not on sim page, re-render current page to show stat changes
+                    this.router(this.state.currentTab || 'overview'); 
+                } else {
+                    this.renderSimulate($('#content-area')); // Update snapshot
+                }
+            }
+
+        } catch(e) {
+            console.error(e);
+            this.logSim(`Error: ${e.message}`);
+        } finally {
+            if(btn) btn.disabled = false;
+        }
+    },
+
+    getSimContext() {
+        // Return a JSON snapshot of the world for the AI
+        return JSON.stringify({
+            time: this.state.time,
+            dramaLevel: this.state.dramaLevel,
+            characters: this.state.characters.map(c => ({ name: c.name, archetype: c.archetype, stats: c.stats })),
+            relationships: this.state.relationships.map(r => {
+                const n1 = this.state.characters.find(x => x.id === r.from)?.name;
+                const n2 = this.state.characters.find(x => x.id === r.to)?.name;
+                return { from: n1, to: n2, type: r.type, strength: r.strength };
+            }),
+            memory: this.state.memory.slice(0, 3)
+        });
+    },
+
+    async callSimulator(contextJson) {
+        const prompt = `You are a deterministic narrative simulation engine.
+RULES:
+1. Analyze the CURRENT WORLD STATE provided below.
+2. Generate ONE meaningful event based on character stats (e.g., High Jealousy triggers Betrayal).
+3. IMPORTANT: You MUST return numeric DELTAS in the "effects" field to update the state mechanically.
+4. Do not invent new characters.
+5. Return STRICT JSON only.
+
+CURRENT WORLD STATE:
+ ${contextJson}
+
+OUTPUT JSON FORMAT:
+{
+    "event": "One sentence summary of what happened.",
+    "type": "confrontation|romance|betrayal|power_shift|revelation",
+    "effects": {
+        "characters": {
+            "NameOfChar": { "power": +1.0, "jealousy": -0.5 },
+            "NameOfChar2": { "trust": -2.0 }
+        },
+        "relationships": [
+            { "from": "NameOfChar", "to": "NameOfChar2", "strength": -1 }
+        ]
+    },
+    "effects_summary": "Text summary of stat changes (e.g. 'Ava gained Power, Noah lost Trust')"
+}`;
+
+        if (!this.state.apiKey) {
+            // --- MOCK MODE (Deterministic Logic) ---
+            await new Promise(r => setTimeout(r, 600));
+            
+            // Simple Mock Logic to prove Simulation works
+            const chars = this.state.characters;
+            const c1 = chars[0].name;
+            const c2 = chars[1].name;
+            
+            // Randomly pick an event type
+            const types = ['confrontation', 'revelation', 'alliance'];
+            const type = types[Math.floor(Math.random() * types.length)];
+            
+            // Generate deterministic deltas
+            const delta1 = (Math.random() * 2 - 1).toFixed(1); // -1 to +1
+            
+            return {
+                event: `${c1} and ${c2} clashed over resources in the academy.`,
+                type: type,
+                effects: {
+                    characters: {
+                        [c1]: { power: parseFloat(delta1) > 0 ? 1 : -1 },
+                        [c2]: { trust: parseFloat(delta1) > 0 ? -0.5 : 1 }
+                    }
+                },
+                effects_summary: `${c1} shifted power, ${c2} adjusted trust.`
+            };
+        } else {
+            // --- REAL AI MODE ---
+            const res = await fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-api-key": this.state.apiKey,
+                    "anthropic-version": "2023-06-01",
+                    "anthropic-dangerous-direct-browser-access": "true"
+                },
+                body: JSON.stringify({
+                    model: "claude-3-haiku-20240307", // Using Haiku for speed/tick-loops, swap to Sonnet if needed
+                    max_tokens: 1024,
+                    messages: [{ role: "user", content: prompt }]
+                })
+            });
+            const data = await res.json();
+            if(data.error) throw new Error(data.error.message);
+            const txt = data.content[0].text;
+            
+            // Clean JSON
+            const jsonMatch = txt.match(/\{[\s\S]*\}/);
+            if(!jsonMatch) throw new Error("No JSON found");
+            return JSON.parse(jsonMatch[0]);
+        }
+    },
+
+    applyEffects(effects) {
+        if(!effects) return;
+
+        // 1. Apply Character Stat Deltas
+        if(effects.characters) {
+            Object.entries(effects.characters).forEach(([name, deltas]) => {
+                const char = this.state.characters.find(c => c.name === name);
+                if(char) {
+                    Object.entries(deltas).forEach(([stat, delta]) => {
+                        if(char.stats[stat] !== undefined) {
+                            char.stats[stat] = clamp(char.stats[stat] + delta, 0, 10);
+                        }
+                    });
+                }
+            });
+        }
+
+        // 2. Apply Relationship Deltas
+        if(effects.relationships) {
+            effects.relationships.forEach(relDelta => {
+                const rel = this.state.relationships.find(r => {
+                    const n1 = this.state.characters.find(c => c.id === r.from)?.name;
+                    const n2 = this.state.characters.find(c => c.id === r.to)?.name;
+                    return n1 === relDelta.from && n2 === relDelta.to;
+                });
+                if(rel) {
+                    rel.strength = clamp(rel.strength + relDelta.strength, 1, 10);
+                } else {
+                    // Create new relationship if implied
+                    const c1 = this.state.characters.find(c => c.name === relDelta.from);
+                    const c2 = this.state.characters.find(c => c.name === relDelta.to);
+                    if(c1 && c2) {
+                        this.state.relationships.push({
+                            id: uuid(),
+                            from: c1.id,
+                            to: c2.id,
+                            type: "tension",
+                            strength: clamp(Math.abs(relDelta.strength), 1, 10)
+                        });
+                    }
+                }
+            });
+        }
+    },
+
+    // --- D3 VISUALIZATION ---
+    drawNetwork() {
+        const container = document.getElementById('net-container');
+        if(!container) return;
+        container.innerHTML = ''; // clear previous
+
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+
+        const svg = d3.select("#net-container").append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        const nodes = this.state.characters.map(c => ({
+            id: c.id, name: c.name, 
+            // Visual size based on Power
+            radius: 10 + (c.stats.power * 1.5),
+            color: c.stats.power > 7 ? '#ef4444' : '#7c3aed'
+        }));
+
+        const links = this.state.relationships.map(r => ({
+            source: r.from, target: r.to,
+            value: r.strength // line thickness
+        }));
+
+        const simulation = d3.forceSimulation(nodes)
+            .force("link", d3.forceLink(links).id(d => d.id).distance(100))
+            .force("charge", d3.forceManyBody().strength(-300))
+            .force("center", d3.forceCenter(width / 2, height / 2));
+
+        const link = svg.append("g")
+            .attr("stroke", "#999")
+            .attr("stroke-opacity", 0.6)
+            .selectAll("line")
+            .data(links)
+            .join("line")
+            .attr("stroke-width", d => Math.sqrt(d.value) * 2);
+
+        const node = svg.append("g")
+            .selectAll("circle")
+            .data(nodes)
+            .join("circle")
+            .attr("r", d => d.radius)
+            .attr("fill", d => d.color)
+            .attr("stroke", "#fff")
+            .attr("stroke-width", 1.5)
+            .call(d3.drag()
+                .on("start", dragstarted)
+                .on("drag", dragged)
+                .on("end", dragended));
+
+        const text = svg.append("g")
+            .selectAll("text")
+            .data(nodes)
+            .join("text")
+            .text(d => d.name)
+            .attr("font-size", 12)
+            .attr("fill", "#e2e8f0")
+            .attr("dx", d => d.radius + 5)
+            .attr("dy", 4);
+
+        simulation.on("tick", () => {
+            link
+                .attr("x1", d => d.source.x)
+                .attr("y1", d => d.source.y)
+                .attr("x2", d => d.target.x)
+                .attr("y2", d => d.target.y);
+
+            node
+                .attr("cx", d => d.x)
+                .attr("cy", d => d.y);
+            
+            text
+                .attr("x", d => d.x)
+                .attr("y", d => d.y);
+        });
+
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+    }
+};
+
+// Start App
+app.init();
+
+</script>
+</body>
+</html>
